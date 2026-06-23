@@ -1,3 +1,7 @@
+# deployment.yaml -- runs the collector itself.
+# A Deployment keeps a desired number of identical pods running and restarts any
+# that die. The HorizontalPodAutoscaler (hpa.yaml) owns replica count at runtime
+# so GitOps does not fight autoscaling decisions.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,7 +9,6 @@ metadata:
   labels:
     app.kubernetes.io/name: otel-collector
 spec:
-  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: otel-collector
@@ -16,10 +19,14 @@ spec:
     spec:
       containers:
         - name: otel-collector
+          # "contrib" image bundles the wide set of receivers/exporters; pinned to a
+          # specific version for reproducibility instead of :latest.
           image: otel/opentelemetry-collector-contrib:0.104.0
           imagePullPolicy: IfNotPresent
+          # Point the collector at the config we mounted from the ConfigMap.
           args:
             - --config=/conf/otel-collector-config.yaml
+          # Named ports so the Services can reference them by name, not number.
           ports:
             - name: otlp-grpc
               containerPort: 4317
@@ -29,18 +36,24 @@ spec:
               containerPort: 8888
             - name: health
               containerPort: 13133
+          # readiness = "can this pod receive traffic yet?" (gates the Service).
           readinessProbe:
             httpGet:
               path: /
               port: health
             initialDelaySeconds: 5
             periodSeconds: 10
+          # liveness = "is this pod still healthy?" If it fails, Kubernetes restarts it.
           livenessProbe:
             httpGet:
               path: /
               port: health
             initialDelaySeconds: 15
             periodSeconds: 20
+          # requests = guaranteed reservation used for scheduling + HPA's CPU %.
+          # limits  = hard ceiling; hitting the memory limit gets the pod OOM-killed,
+          # hitting the CPU limit throttles it. These small numbers make the cluster
+          # easy to saturate during load testing so we can observe a bottleneck.
           resources:
             requests:
               cpu: 250m
@@ -48,6 +61,7 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+          # Mount the ConfigMap's YAML into the container at /conf.
           volumeMounts:
             - name: config
               mountPath: /conf

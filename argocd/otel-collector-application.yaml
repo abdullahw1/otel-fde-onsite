@@ -1,3 +1,7 @@
+# otel-collector-application.yaml -- the GitOps definition for our collector.
+# An Argo CD "Application" says: "keep this cluster path in sync with this Git path."
+# Argo continuously compares Git (the desired state) to the cluster (actual state)
+# and reconciles any difference. This is how a `git push` becomes a live deploy.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -6,15 +10,26 @@ metadata:
 spec:
   project: default
   source:
+    # WHERE the manifests live. Argo pulls this repo (must be the real, pushed repo).
     repoURL: https://github.com/abdullahw1/otel-fde-onsite.git
-    targetRevision: HEAD
-    path: k8s/otel-collector
+    targetRevision: HEAD          # track the latest commit on the default branch
+    path: k8s/otel-collector      # the folder with our kustomization.yaml
   destination:
-    server: https://kubernetes.default.svc
+    server: https://kubernetes.default.svc   # this same cluster
     namespace: otel
   syncPolicy:
     automated:
-      prune: true
-      selfHeal: true
+      prune: true     # if you delete a manifest in Git, Argo deletes it from the cluster
+      selfHeal: true  # if someone hand-edits the cluster, Argo reverts it back to Git
     syncOptions:
-      - CreateNamespace=true
+      - CreateNamespace=true   # create the otel namespace if it doesn't exist
+      - RespectIgnoreDifferences=true
+  # HPA owns Deployment replicas at runtime. Without this, Argo self-heal can
+  # scale the collector back down during load tests and cause avoidable churn.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: otel-collector
+      namespace: otel
+      jsonPointers:
+        - /spec/replicas
