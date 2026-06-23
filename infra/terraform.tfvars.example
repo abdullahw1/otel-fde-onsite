@@ -1,0 +1,12 @@
+name              = "otel-fde"
+environment       = "onsite"
+aws_region        = "us-west-2"
+cluster_version   = "1.30"
+node_instance_types = ["t3.large"]
+node_desired_size = 2
+node_min_size     = 2
+node_max_size     = 4
+
+# Replace with your current public IP CIDR during real use, for example:
+# admin_cidr_blocks = ["203.0.113.10/32"]
+admin_cidr_blocks = ["0.0.0.0/0"]
