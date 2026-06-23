@@ -1,18 +1,33 @@
+# service-nlb.yaml -- the PUBLIC entry point for sending telemetry into the cluster.
+# This is "the load balancer." A type: LoadBalancer Service tells the EKS cloud
+# controller to provision a real AWS load balancer in front of the collector pods,
+# give it a public DNS name, and forward external traffic to the pods. Without this,
+# nothing outside the cluster (like the Locust test on your laptop) could reach the
+# collector. We expose ONLY the two ingestion ports here -- metrics/health stay private.
 apiVersion: v1
 kind: Service
 metadata:
   name: otel-collector-nlb
   labels:
     app.kubernetes.io/name: otel-collector
+  # These annotations tell AWS exactly what kind of load balancer to build:
   annotations:
+    # nlb = Network Load Balancer (Layer 4 / raw TCP). We pick NLB over ALB because
+    # OTLP is a TCP protocol (esp. gRPC); NLB is fast, simple, and avoids needing the
+    # extra AWS Load Balancer Controller + ingress/IAM setup an ALB would require.
     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    # internet-facing = give it a public IP/DNS (vs "internal" for private-only).
     service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    # instance target type = NLB forwards to the node's port, then kube-proxy routes
+    # to a collector pod. Simple and works without the LB controller.
     service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
 spec:
   type: LoadBalancer
   externalTrafficPolicy: Cluster
+  # Send traffic to the same collector pods as the internal Service.
   selector:
     app.kubernetes.io/name: otel-collector
+  # Only ingestion ports are public; nothing else is exposed to the internet.
   ports:
     - name: otlp-grpc
       port: 4317

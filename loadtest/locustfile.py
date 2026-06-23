@@ -1,3 +1,21 @@
+"""Locust load test for the OTel Collector's OTLP/HTTP ingestion endpoint.
+
+The goal of this file is NOT to fire constant, identical traffic. It deliberately
+mixes several *shapes* of request so we can see which characteristic stresses the
+collector first -- raw request rate, payload size, attribute complexity, or bursts.
+
+It does that with four weighted "user" classes (defined at the bottom):
+  - SmallTraceUser   (weight 6) -> tiny, fast traces        -> tests pure throughput
+  - LargeTraceUser   (weight 2) -> 200 spans + padding      -> tests serialization cost
+  - ComplexTraceUser (weight 1) -> many attributes per span -> tests parsing cost
+  - BurstyTraceUser  (weight 1) -> many requests in a burst -> tests spiky load
+
+Every payload knob is overridable via env vars (e.g. LARGE_TRACE_SPANS) so the same
+file can drive the different profiles documented in README.md. The process also
+exposes its own Prometheus metrics on :9646 (latency, request counts, payload size)
+so Grafana can correlate client-side behavior with collector-side metrics.
+"""
+
 import json
 import os
 import random
@@ -58,6 +76,8 @@ def attributes(values: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"key": key, "value": otlp_value(value)} for key, value in values.items()]
 
 
+# Build one OTLP span as a dict. attr_count and pad_bytes are the levers we use to
+# make a span "heavier" (more attributes to parse, more bytes to serialize/transfer).
 def build_span(profile: str, index: int, attr_count: int, pad_bytes: int) -> dict[str, Any]:
     now = time.time_ns()
     duration_ns = random.randint(100_000, 50_000_000)
@@ -160,6 +180,9 @@ def record_active_users(user_count, **_kwargs) -> None:
     ACTIVE_USERS.set(user_count)
 
 
+# Base class shared by every user profile. abstract=True means Locust won't run it
+# directly -- only its subclasses. post_trace() builds a payload, POSTs it to the
+# collector's /v1/traces, records the payload size, and flags HTTP 4xx/5xx as failures.
 class OtlpTraceUser(HttpUser):
     abstract = True
     endpoint_path = os.getenv("OTEL_ENDPOINT_PATH", "/v1/traces")
@@ -188,6 +211,9 @@ class OtlpTraceUser(HttpUser):
                 response.failure(f"collector returned HTTP {response.status_code}")
 
 
+# weight = relative share of simulated users. With weights 6/2/1/1, most traffic is
+# small+fast, with a minority of large, complex, and bursty senders -- a realistic mix.
+# wait_time = how long each user pauses between tasks (controls per-user request rate).
 class SmallTraceUser(OtlpTraceUser):
     weight = 6
     wait_time = between(0.1, 0.5)

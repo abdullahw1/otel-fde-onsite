@@ -1,3 +1,7 @@
+# metrics-server-application.yaml -- deploys metrics-server via Argo CD.
+# metrics-server collects live CPU/memory usage from each node/pod. It is REQUIRED
+# for the HPA to work: without it the autoscaler has no CPU readings and can't scale.
+# EKS does not ship it by default, so we add it ourselves.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -13,7 +17,7 @@ spec:
       releaseName: metrics-server
   destination:
     server: https://kubernetes.default.svc
-    namespace: kube-system
+    namespace: kube-system     # lives alongside other core cluster components
   syncPolicy:
     automated:
       prune: true

@@ -1,17 +1,27 @@
+# servicemonitor.yaml -- tells Prometheus to scrape the collector's own metrics.
+# ServiceMonitor is a CRD installed by kube-prometheus-stack. Instead of editing
+# Prometheus config by hand, you declare "scrape this Service's :metrics port" and
+# the Prometheus Operator wires it up. This is what feeds the Grafana dashboard's
+# collector panels (accepted/refused spans, CPU, memory, etc.).
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: otel-collector
   labels:
     app.kubernetes.io/name: otel-collector
+    # Prometheus is configured to discover ServiceMonitors regardless of label, but
+    # this release label is the conventional way to be picked up by that instance.
     release: kube-prometheus-stack
 spec:
+  # Look for the target Service in the otel namespace...
   namespaceSelector:
     matchNames:
       - otel
+  # ...specifically the Service(s) with this label (our ClusterIP service.yaml).
   selector:
     matchLabels:
       app.kubernetes.io/name: otel-collector
+  # Scrape the named "metrics" port (8888) every 15s.
   endpoints:
     - port: metrics
       path: /metrics

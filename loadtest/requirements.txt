@@ -1,2 +1,3 @@
-locust>=2.29.0
-prometheus-client>=0.20.0
+# Python dependencies for the load test (pip install -r requirements.txt).
+locust>=2.29.0            # the load-testing framework that drives the traffic
+prometheus-client>=0.20.0 # lets locustfile.py expose its own metrics on :9646

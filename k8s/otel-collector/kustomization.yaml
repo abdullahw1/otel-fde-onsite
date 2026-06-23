@@ -1,3 +1,7 @@
+# kustomization.yaml -- bundles all the manifests in this folder into one unit.
+# Argo CD sees this file and applies everything below as a set (and forces them all
+# into the "otel" namespace). This is the single path the otel-collector Argo CD
+# Application points at, so adding a file here = adding it to the deployment.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: otel
@@ -9,3 +13,4 @@ resources:
   - service-nlb.yaml
   - servicemonitor.yaml
   - hpa.yaml
+  - grafana-dashboard-configmap.yaml   # custom Grafana dashboard, auto-loaded by the sidecar

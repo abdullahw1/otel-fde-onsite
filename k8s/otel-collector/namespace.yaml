@@ -1,3 +1,5 @@
+# namespace.yaml -- a dedicated "otel" namespace to isolate the collector's
+# resources from the monitoring stack and system pods (easier to manage/delete).
 apiVersion: v1
 kind: Namespace
 metadata:

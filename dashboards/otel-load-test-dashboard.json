@@ -15,6 +15,7 @@
       }
     ]
   },
+  "description": "Load-test dashboard for the OTel Collector. JSON files cannot hold code comments, so this description documents intent: panels correlate Locust client load (request rate, latency, errors) with collector health (accepted/refused spans, CPU vs limit, memory vs limit, restarts/OOM), HPA replicas, and node saturation -- so you can answer 'what fails first as traffic scales?'. Note: locust_* panels only show data when Locust runs in-cluster; from a laptop, read those from the CSV results instead.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,

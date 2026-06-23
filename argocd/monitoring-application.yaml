@@ -1,3 +1,7 @@
+# monitoring-application.yaml -- deploys the whole observability stack via Argo CD.
+# Instead of a Git path, this Application points at a public Helm chart
+# (kube-prometheus-stack), which bundles Prometheus, Grafana, Alertmanager,
+# node-exporter, and kube-state-metrics. We pass our settings inline as valuesObject.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -8,13 +12,16 @@ spec:
   source:
     repoURL: https://prometheus-community.github.io/helm-charts
     chart: kube-prometheus-stack
-    targetRevision: 61.9.0
+    targetRevision: 61.9.0        # pinned chart version for reproducibility
     helm:
       releaseName: kube-prometheus-stack
       valuesObject:
         prometheus:
           prometheusSpec:
-            retention: 6h
+            retention: 6h         # short retention -- this is a throwaway test cluster
+            # These two "false" flags are important: by default Prometheus only picks
+            # up ServiceMonitors created by this Helm release. Setting them false makes
+            # it discover ALL ServiceMonitors cluster-wide -- including our collector's.
             serviceMonitorSelectorNilUsesHelmValues: false
             podMonitorSelectorNilUsesHelmValues: false
             resources:
@@ -25,13 +32,13 @@ spec:
                 cpu: "1"
                 memory: 2Gi
         grafana:
-          adminPassword: admin
+          adminPassword: admin           # demo only -- fine for a private, port-forwarded Grafana
           service:
-            type: ClusterIP
+            type: ClusterIP              # private: reach it via `kubectl port-forward`, not the internet
           sidecar:
             dashboards:
-              enabled: true
-              searchNamespace: ALL
+              enabled: true              # auto-load dashboards from ConfigMaps...
+              searchNamespace: ALL       # ...in any namespace
           resources:
             requests:
               cpu: 100m
@@ -48,4 +55,6 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # ServerSideApply avoids "annotation too large" errors from the big CRDs this
+      # chart installs -- a known requirement for kube-prometheus-stack via Argo.
       - ServerSideApply=true

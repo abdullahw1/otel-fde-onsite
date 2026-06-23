@@ -1,0 +1,533 @@
+# grafana-dashboard-configmap.yaml -- ships our custom load-test dashboard into Grafana.
+# The Grafana sidecar (enabled in argocd/monitoring-application.yaml) watches for any
+# ConfigMap labeled `grafana_dashboard: "1"` across all namespaces and auto-imports the
+# JSON inside it. So once Argo CD applies this, the dashboard appears in Grafana with no
+# manual import -- and it's version-controlled like everything else (true GitOps).
+#
+# NOTE: the JSON below is a copy of dashboards/otel-load-test-dashboard.json. If you edit
+# the dashboard, regenerate this file with:
+#   kubectl create configmap otel-load-test-dashboard \
+#     --from-file=otel-load-test-dashboard.json=dashboards/otel-load-test-dashboard.json \
+#     --dry-run=client -o yaml
+# (then re-add the label below).
+apiVersion: v1
+data:
+  otel-load-test-dashboard.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "description": "Load-test dashboard for the OTel Collector. JSON files cannot hold code comments, so this description documents intent: panels correlate Locust client load (request rate, latency, errors) with collector health (accepted/refused spans, CPU vs limit, memory vs limit, restarts/OOM), HPA replicas, and node saturation -- so you can answer 'what fails first as traffic scales?'. Note: locust_* panels only show data when Locust runs in-cluster; from a laptop, read those from the CSV results instead.",
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(otelcol_receiver_accepted_spans{namespace=\"$namespace\"}[5m]))",
+              "legendFormat": "accepted spans/s",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(rate(otelcol_receiver_refused_spans{namespace=\"$namespace\"}[5m]))",
+              "legendFormat": "refused spans/s",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(rate(locust_requests_total{result=\"success\"}[5m]))",
+              "legendFormat": "locust success req/s",
+              "refId": "C"
+            },
+            {
+              "expr": "sum(rate(locust_requests_total{result=\"failure\"}[5m]))",
+              "legendFormat": "locust failure req/s",
+              "refId": "D"
+            }
+          ],
+          "title": "Traffic And Error Rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "id": 2,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(locust_request_latency_seconds_bucket[5m])))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(locust_request_latency_seconds_bucket[5m])))",
+              "legendFormat": "p95",
+              "refId": "B"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(locust_request_latency_seconds_bucket[5m])))",
+              "legendFormat": "p99",
+              "refId": "C"
+            }
+          ],
+          "title": "Client Latency From Locust",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 7
+          },
+          "id": 3,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",pod=~\"$pod\",container!=\"\",image!=\"\"}[5m])) / sum by (pod) (kube_pod_container_resource_limits{namespace=\"$namespace\",pod=~\"$pod\",resource=\"cpu\"})",
+              "legendFormat": "{{pod}} cpu/limit",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\",pod=~\"$pod\",container!=\"\"}[5m])) / sum by (pod) (rate(container_cpu_cfs_periods_total{namespace=\"$namespace\",pod=~\"$pod\",container!=\"\"}[5m]))",
+              "legendFormat": "{{pod}} throttle ratio",
+              "refId": "B"
+            }
+          ],
+          "title": "Collector CPU Saturation",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 7
+          },
+          "id": 4,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\",pod=~\"$pod\",container!=\"\",image!=\"\"})",
+              "legendFormat": "{{pod}} working set",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (pod) (kube_pod_container_resource_limits{namespace=\"$namespace\",pod=~\"$pod\",resource=\"memory\"})",
+              "legendFormat": "{{pod}} memory limit",
+              "refId": "B"
+            }
+          ],
+          "title": "Collector Memory",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 14
+          },
+          "id": 5,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\",pod=~\"$pod\"}[5m]))",
+              "legendFormat": "{{pod}} restarts/5m",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (pod) (kube_pod_container_status_last_terminated_reason{namespace=\"$namespace\",pod=~\"$pod\",reason=\"OOMKilled\"})",
+              "legendFormat": "{{pod}} oom last reason",
+              "refId": "B"
+            }
+          ],
+          "title": "Restarts And OOM Signals",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 14
+          },
+          "id": 6,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "kube_deployment_status_replicas_available{namespace=\"$namespace\",deployment=\"otel-collector\"}",
+              "legendFormat": "available replicas",
+              "refId": "A"
+            },
+            {
+              "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"$namespace\",horizontalpodautoscaler=\"otel-collector\"}",
+              "legendFormat": "hpa current",
+              "refId": "B"
+            },
+            {
+              "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"$namespace\",horizontalpodautoscaler=\"otel-collector\"}",
+              "legendFormat": "hpa desired",
+              "refId": "C"
+            }
+          ],
+          "title": "Scaling Behavior",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 14
+          },
+          "id": 7,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
+              "legendFormat": "{{instance}} cpu",
+              "refId": "A"
+            },
+            {
+              "expr": "1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
+              "legendFormat": "{{instance}} memory",
+              "refId": "B"
+            }
+          ],
+          "title": "Node Saturation",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 21
+          },
+          "id": 8,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (pod) (rate(container_network_receive_bytes_total{namespace=\"$namespace\",pod=~\"$pod\"}[5m]))",
+              "legendFormat": "{{pod}} rx",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (pod) (rate(container_network_transmit_bytes_total{namespace=\"$namespace\",pod=~\"$pod\"}[5m]))",
+              "legendFormat": "{{pod}} tx",
+              "refId": "B"
+            }
+          ],
+          "title": "Collector Network",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 21
+          },
+          "id": 9,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(otelcol_processor_batch_batch_send_size_sum{namespace=\"$namespace\"}[5m])) / clamp_min(sum(rate(otelcol_processor_batch_batch_send_size_count{namespace=\"$namespace\"}[5m])), 1)",
+              "legendFormat": "avg batch size",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(rate(otelcol_exporter_sent_spans{namespace=\"$namespace\"}[5m]))",
+              "legendFormat": "exported spans/s",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(rate(otelcol_processor_dropped_spans{namespace=\"$namespace\"}[5m]))",
+              "legendFormat": "processor dropped spans/s",
+              "refId": "C"
+            }
+          ],
+          "title": "Collector Pipeline Health",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": [
+        "otel",
+        "load-test",
+        "eks"
+      ],
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "hide": 0,
+            "includeAll": false,
+            "label": "Prometheus",
+            "multi": false,
+            "name": "DS_PROMETHEUS",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "regex": "",
+            "type": "datasource"
+          },
+          {
+            "current": {
+              "selected": false,
+              "text": "otel",
+              "value": "otel"
+            },
+            "hide": 0,
+            "label": "Namespace",
+            "name": "namespace",
+            "options": [
+              {
+                "selected": true,
+                "text": "otel",
+                "value": "otel"
+              }
+            ],
+            "query": "otel",
+            "type": "constant"
+          },
+          {
+            "current": {
+              "selected": false,
+              "text": "otel-collector.*",
+              "value": "otel-collector.*"
+            },
+            "hide": 0,
+            "label": "Collector Pod Regex",
+            "name": "pod",
+            "options": [
+              {
+                "selected": true,
+                "text": "otel-collector.*",
+                "value": "otel-collector.*"
+              }
+            ],
+            "query": "otel-collector.*",
+            "type": "constant"
+          }
+        ]
+      },
+      "time": {
+        "from": "now-30m",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "OTEL Collector Load Test",
+      "uid": "otel-load-test",
+      "version": 1,
+      "weekStart": ""
+    }
+kind: ConfigMap
+metadata:
+  name: otel-load-test-dashboard
+  labels:
+    # This label is the trigger: the Grafana sidecar only loads ConfigMaps that have it.
+    grafana_dashboard: "1"

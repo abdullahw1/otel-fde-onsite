@@ -1,3 +1,8 @@
+# service.yaml -- the INTERNAL (cluster-only) address for the collector.
+# A Service gives a stable name + IP that load-balances across the collector pods
+# (which come and go as the HPA scales). type: ClusterIP means it is reachable only
+# from inside the cluster. This is what Prometheus uses to scrape the :8888 metrics,
+# and what other in-cluster apps would use to send telemetry.
 apiVersion: v1
 kind: Service
 metadata:
@@ -6,6 +11,7 @@ metadata:
     app.kubernetes.io/name: otel-collector
 spec:
   type: ClusterIP
+  # Route to any pod carrying this label (the collector pods from the Deployment).
   selector:
     app.kubernetes.io/name: otel-collector
   ports:

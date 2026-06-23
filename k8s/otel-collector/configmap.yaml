@@ -1,3 +1,11 @@
+# configmap.yaml -- the OpenTelemetry Collector's actual configuration file.
+# A ConfigMap is how Kubernetes injects config into a pod without baking it into
+# the image. The deployment mounts this YAML at /conf and the collector reads it.
+#
+# An OTel Collector pipeline is always: RECEIVERS -> PROCESSORS -> EXPORTERS.
+#   receivers  = how data gets IN     (we accept OTLP over gRPC + HTTP)
+#   processors = what we do to it     (protect memory, then batch for efficiency)
+#   exporters  = where data goes OUT  (here: debug/stdout, no external backend)
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,39 +14,56 @@ metadata:
     app.kubernetes.io/name: otel-collector
 data:
   otel-collector-config.yaml: |
+    # RECEIVERS: open the standard OTLP ingestion ports. 0.0.0.0 = listen on all
+    # interfaces so traffic arriving via the Service/NLB reaches the collector.
     receivers:
       otlp:
         protocols:
           grpc:
-            endpoint: 0.0.0.0:4317
+            endpoint: 0.0.0.0:4317   # OTLP gRPC
           http:
-            endpoint: 0.0.0.0:4318
+            endpoint: 0.0.0.0:4318   # OTLP HTTP/JSON (what the Locust test uses)
 
     processors:
+      # memory_limiter is a safety valve: if the collector approaches its memory
+      # limit it starts refusing data instead of being OOM-killed by Kubernetes.
+      # This is what makes "refused spans" show up under heavy load (a key signal).
       memory_limiter:
         check_interval: 1s
         limit_percentage: 75
         spike_limit_percentage: 15
+      # batch groups many small spans into fewer, larger exports. This is the main
+      # efficiency win -- without it every span would trigger its own export call.
       batch:
         timeout: 1s
         send_batch_size: 8192
 
     exporters:
+      # debug just prints a sample to stdout. It lets us prove the whole pipeline
+      # works end-to-end without standing up a real backend (Jaeger/Tempo/etc).
+      # In production you'd swap this for an OTLP exporter to your tracing backend.
       debug:
         verbosity: basic
         sampling_initial: 5
         sampling_thereafter: 1000
 
     extensions:
+      # health_check exposes an HTTP endpoint Kubernetes probes to know if the pod
+      # is alive/ready (see the readiness/liveness probes in deployment.yaml).
       health_check:
         endpoint: 0.0.0.0:13133
 
     service:
       telemetry:
+        # The collector exposes its OWN metrics here (accepted/refused spans, CPU,
+        # memory). Prometheus scrapes this port via the ServiceMonitor.
         metrics:
           address: 0.0.0.0:8888
       extensions:
         - health_check
+      # Three independent pipelines, one per signal type. They share the same
+      # receiver/processors/exporter wiring. Order matters: memory_limiter MUST be
+      # before batch so we gate data before it fills the batch buffer.
       pipelines:
         traces:
           receivers:

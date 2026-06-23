@@ -1,3 +1,7 @@
+# kube-prometheus-stack-values.yaml -- standalone reference copy of the Helm values.
+# NOTE: this file is NOT what's actually deployed. Argo CD applies the SAME values
+# inlined under `valuesObject` in argocd/monitoring-application.yaml. Keep this as a
+# readable reference / `helm install -f` fallback, or delete it to avoid duplication.
 prometheus:
   prometheusSpec:
     retention: 6h
