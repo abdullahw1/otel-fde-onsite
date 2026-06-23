@@ -1,0 +1,127 @@
+# locust-incluster.yaml -- OPTIONAL, demo-only. NOT part of the Argo CD sync path
+# (Argo only watches k8s/otel-collector), so this never runs unless you apply it by
+# hand. Its purpose: run Locust *inside* the cluster so its Prometheus metrics
+# (locust_request_latency_seconds, locust_requests_total) are scrapeable. That makes
+# the Grafana "Client Latency From Locust" / "Traffic And Error Rate" panels populate
+# -- they read locust_* metrics, which the cluster Prometheus cannot get when Locust
+# runs on your laptop.
+#
+# Apply (run from repo root so the configmap is built from the real locustfile):
+#   kubectl -n otel create configmap locust-locustfile \
+#     --from-file=locustfile.py=loadtest/locustfile.py \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f k8s/loadtest/locust-incluster.yaml
+#
+# Stop generating load (without deleting):
+#   kubectl -n otel scale deploy/locust --replicas=0
+#
+# Tear down completely:
+#   kubectl delete -f k8s/loadtest/locust-incluster.yaml
+#   kubectl -n otel delete configmap locust-locustfile
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: locust
+  namespace: otel
+  labels:
+    app: locust
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: locust
+  template:
+    metadata:
+      labels:
+        app: locust
+    spec:
+      containers:
+        - name: locust
+          image: locustio/locust:2.44.4
+          # The official image doesn't bundle prometheus_client (our locustfile needs
+          # it). Install it at startup (NAT gateway gives the pod egress), then run
+          # Locust headless and indefinitely so the :9646 metrics endpoint stays up
+          # for Prometheus to scrape live during the demo.
+          command: ["/bin/sh", "-lc"]
+          args:
+            - >-
+              pip install --no-cache-dir --user prometheus_client &&
+              exec locust -f /mnt/locust/locustfile.py
+              --host "$OTEL_HOST"
+              --headless
+              -u "$USERS" -r "$SPAWN"
+              --prometheus-port 9646
+          env:
+            # Default to the in-cluster Service. Switch to the public NLB hostname if
+            # you want the traffic to traverse the NLB:
+            #   http://<nlb-hostname>:4318
+            - name: OTEL_HOST
+              value: "http://otel-collector.otel.svc.cluster.local:4318"
+            - name: USERS
+              value: "100"
+            - name: SPAWN
+              value: "20"
+            # Payload-shaping knobs (same env vars the locustfile reads). Bump these
+            # to push the collector harder while still showing client latency live.
+            - name: LARGE_TRACE_SPANS
+              value: "200"
+            - name: LARGE_TRACE_PAD_BYTES
+              value: "64"
+            - name: COMPLEX_TRACE_PAD_BYTES
+              value: "128"
+          ports:
+            - name: metrics
+              containerPort: 9646
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: locustfile
+              mountPath: /mnt/locust
+      volumes:
+        - name: locustfile
+          configMap:
+            name: locust-locustfile
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: locust
+  namespace: otel
+  labels:
+    app: locust
+spec:
+  type: ClusterIP
+  selector:
+    app: locust
+  ports:
+    - name: metrics
+      port: 9646
+      targetPort: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: locust
+  namespace: otel
+  labels:
+    app: locust
+    # kube-prometheus-stack is configured to discover all ServiceMonitors, so this
+    # gets picked up automatically and Prometheus starts scraping locust_* metrics.
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - otel
+  selector:
+    matchLabels:
+      app: locust
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
